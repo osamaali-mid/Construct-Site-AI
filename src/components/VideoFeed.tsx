@@ -181,6 +181,7 @@ export const VideoFeed: React.FC = () => {
           selectedModel={detectionConfig.modelType}
           onModelChange={handleModelChange}
           isModelLoaded={isModelLoaded}
+        />
       )}
     </div>
   );
