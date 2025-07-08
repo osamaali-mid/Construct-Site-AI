@@ -73,6 +73,7 @@ export const VideoFeed: React.FC = () => {
   const handleModelChange = (modelType: 'tensorflow' | 'opencv' | 'simulation') => {
     setDetectionConfig(prev => ({ ...prev, modelType }));
   };
+
   return (
     <div className="space-y-6">
       <div className="card">
@@ -181,11 +182,6 @@ export const VideoFeed: React.FC = () => {
           onModelChange={handleModelChange}
           isModelLoaded={isModelLoaded}
         />
-      )}
-    </div>
-  );
-};
-        </div>
       )}
     </div>
   );
