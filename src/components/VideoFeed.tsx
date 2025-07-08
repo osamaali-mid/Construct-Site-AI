@@ -1,13 +1,36 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Camera, Play, Pause, Settings } from 'lucide-react';
+import { Camera, Play, Pause, Settings, Zap } from 'lucide-react';
 import { usePeopleCounter } from '../context/PeopleCounterContext';
+import { usePeopleDetection } from '../hooks/usePeopleDetection';
+import { ModelSelector } from './ModelSelector';
+import { DetectionConfig } from '../services/DetectionService';
 
 export const VideoFeed: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const { updateCount, config } = usePeopleCounter();
+  const [showModelSelector, setShowModelSelector] = useState(false);
+  const [detectionConfig, setDetectionConfig] = useState<DetectionConfig>({
+    modelType: 'simulation',
+    confidenceThreshold: 0.5,
+    nmsThreshold: 0.4,
+    inputSize: 300
+  });
+  
+  const { config } = usePeopleCounter();
+  
+  const { 
+    isModelLoaded, 
+    lastDetection, 
+    processingTime, 
+    modelType 
+  } = usePeopleDetection({
+    videoRef,
+    canvasRef,
+    isActive: isPlaying,
+    detectionConfig
+  });
 
   useEffect(() => {
     if (isPlaying) {
@@ -30,21 +53,6 @@ export const VideoFeed: React.FC = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
         setStream(mediaStream);
-        
-        // Simulate people detection (in real implementation, this would use computer vision)
-        const interval = setInterval(() => {
-          const randomEntry = Math.random() > 0.7;
-          const randomExit = Math.random() > 0.8;
-          
-          if (randomEntry) {
-            updateCount('enter');
-          }
-          if (randomExit) {
-            updateCount('exit');
-          }
-        }, 3000);
-
-        return () => clearInterval(interval);
       }
     } catch (error) {
       console.error('Error accessing camera:', error);
@@ -62,72 +70,121 @@ export const VideoFeed: React.FC = () => {
     setIsPlaying(!isPlaying);
   };
 
+  const handleModelChange = (modelType: 'tensorflow' | 'opencv' | 'simulation') => {
+    setDetectionConfig(prev => ({ ...prev, modelType }));
+  };
   return (
-    <div className="card">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-900">Live Video Feed</h2>
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={togglePlayback}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-              isPlaying 
-                ? 'bg-red-100 text-red-700 hover:bg-red-200' 
-                : 'bg-green-100 text-green-700 hover:bg-green-200'
-            }`}
-          >
-            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            <span>{isPlaying ? 'Stop' : 'Start'}</span>
-          </button>
-          <button className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg">
-            <Settings className="w-5 h-5" />
-          </button>
+    <div className="space-y-6">
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-3">
+            <h2 className="text-xl font-semibold text-gray-900">Live Video Feed</h2>
+            <div className="flex items-center space-x-2">
+              <Zap className={`w-4 h-4 ${isModelLoaded ? 'text-green-500' : 'text-gray-400'}`} />
+              <span className="text-sm text-gray-600">{modelType}</span>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={togglePlayback}
+              disabled={!isModelLoaded}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                isPlaying 
+                  ? 'bg-red-100 text-red-700 hover:bg-red-200' 
+                  : 'bg-green-100 text-green-700 hover:bg-green-200'
+              } ${!isModelLoaded ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              <span>{isPlaying ? 'Stop' : 'Start'}</span>
+            </button>
+            <button 
+              onClick={() => setShowModelSelector(!showModelSelector)}
+              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
-        {isPlaying ? (
-          <>
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              className="w-full h-full object-cover"
-            />
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 w-full h-full"
-            />
-            
-            {/* Detection Line */}
-            <div className="absolute inset-x-0 top-1/2 h-0.5 bg-yellow-400 opacity-80">
-              <div className="absolute -top-6 left-4 text-yellow-400 text-sm font-medium">
-                Detection Line
+        <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
+          {isPlaying ? (
+            <>
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                className="w-full h-full object-cover"
+              />
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+              />
+              
+              {/* Live Indicator */}
+              <div className="absolute top-4 left-4 flex items-center space-x-2">
+                <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                <span className="text-white text-sm font-medium">LIVE</span>
+              </div>
+
+              {/* Detection Stats */}
+              {lastDetection && (
+                <div className="absolute top-4 right-4 bg-black bg-opacity-70 text-white p-2 rounded">
+                  <div className="text-sm">
+                    <div>People: {lastDetection.count}</div>
+                    <div>Processing: {processingTime.toFixed(1)}ms</div>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400">
+              <Camera className="w-16 h-16 mb-4" />
+              <p className="text-lg font-medium">
+                {!isModelLoaded ? 'Loading Detection Model...' : 'Camera Feed Stopped'}
+              </p>
+              <p className="text-sm">
+                {!isModelLoaded ? 'Please wait...' : 'Click Start to begin monitoring'}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {config.showDetectionInfo && (
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <strong className="text-blue-800">Detection Status:</strong>
+                <span className="ml-2 text-blue-600">
+                  {isPlaying ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              <div>
+                <strong className="text-blue-800">Model:</strong>
+                <span className="ml-2 text-blue-600">{modelType}</span>
+              </div>
+              <div>
+                <strong className="text-blue-800">Confidence:</strong>
+                <span className="ml-2 text-blue-600">{(detectionConfig.confidenceThreshold * 100).toFixed(0)}%</span>
+              </div>
+              <div>
+                <strong className="text-blue-800">Processing:</strong>
+                <span className="ml-2 text-blue-600">{processingTime.toFixed(1)}ms</span>
               </div>
             </div>
-
-            {/* Live Indicator */}
-            <div className="absolute top-4 left-4 flex items-center space-x-2">
-              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-              <span className="text-white text-sm font-medium">LIVE</span>
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400">
-            <Camera className="w-16 h-16 mb-4" />
-            <p className="text-lg font-medium">Camera Feed Stopped</p>
-            <p className="text-sm">Click Start to begin monitoring</p>
           </div>
         )}
       </div>
-
-      {config.showDetectionInfo && (
-        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-          <p className="text-sm text-blue-800">
-            <strong>Detection Status:</strong> {isPlaying ? 'Active - Monitoring for people' : 'Inactive'}
-          </p>
-          <p className="text-xs text-blue-600 mt-1">
-            People crossing the yellow line will be counted automatically
-          </p>
+      
+      {showModelSelector && (
+        <ModelSelector
+          selectedModel={detectionConfig.modelType}
+          onModelChange={handleModelChange}
+          isModelLoaded={isModelLoaded}
+        />
+      )}
+    </div>
+  );
+};
         </div>
       )}
     </div>
